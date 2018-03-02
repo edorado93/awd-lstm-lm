@@ -10,6 +10,8 @@ import data
 import model
 
 from utils import batchify, get_batch, repackage_hidden
+from gensim.models import KeyedVectors
+import numpy as np
 
 parser = argparse.ArgumentParser(description='PyTorch PennTreeBank RNN/LSTM Language Model')
 parser.add_argument('--data', type=str, default='data/penn/',
@@ -61,6 +63,8 @@ parser.add_argument('--beta', type=float, default=1,
                     help='beta slowness regularization applied on RNN activiation (beta = 0 means no regularization)')
 parser.add_argument('--wdecay', type=float, default=1.2e-6,
                     help='weight decay applied to all weights')
+parser.add_argument('--pretrained', type=str, default=randomhash+'.vec',
+                    help='Pretrained word embeddings file to use')
 args = parser.parse_args()
 
 # Set the random seed manually for reproducibility.
@@ -117,6 +121,43 @@ def evaluate(data_source, batch_size=10):
         hidden = repackage_hidden(hidden)
     return total_loss[0] / len(data_source)
 
+def test_loaded_word_embeddings(model, word2index):
+    i = 0
+    for word in word2index:
+        index = word2index[word]
+        embedding = model.encoder(Variable(torch.cuda.LongTensor([index])))
+        print("Word embedding for the word ****", word, "**** is", embedding[:, 0:5])
+        i += 1
+
+        if i == 10:
+            break
+
+def load_word_embeddings(model, filename, word2index):
+
+    test_loaded_word_embeddings(model, word2index)
+
+    print("Copying pretrained word embeddings from ", filename)
+    en_model = KeyedVectors.load_word2vec_format(filename)
+    """ Fetching all of the words in the vocabulary. """
+    pretrained_words = set()
+    for word in en_model.vocab:
+        pretrained_words.add(word)
+
+    arr = [0] * len(word2index)
+    for word in word2index:
+        index = word2index[word]
+        if word in pretrained_words:
+            arr[index] = en_model[word]
+        else:
+            arr[index] = np.random.uniform(-1.0, 1.0, args.emsize)
+
+    """ Creating a numpy dictionary for the index -> embedding mapping """
+    arr = np.array(arr)
+    """ Add the word embeddings to the empty PyTorch Embedding object """
+    model.encoder.weight.data.copy_(torch.from_numpy(arr))
+
+    test_loaded_word_embeddings(model, word2index)
+load_word_embeddings(model, args.pretrained, corpus.dictionary.word2idx)
 
 def train():
     # Turn on training mode which enables dropout.
