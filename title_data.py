@@ -23,6 +23,9 @@ class Dictionary(object):
         return len(self.idx2word)
 
 class TitlesAndAbstracts(object):
+
+    unknown = 'UNK'
+
     def __init__(self, path):
         self.dictionay = Dictionary()
 
@@ -41,8 +44,7 @@ class TitlesAndAbstracts(object):
             if word in self.dictionay.word2idx:
                 title_tensor[i] = self.dictionay.word2idx[word]
             else:
-                #TODO handle OOV words here.
-                title_tensor[i] = 0
+                title_tensor[i] = self.dictionay.word2idx[TitlesAndAbstracts.unknown]
         return title_tensor
 
     """ Returns a list of LongTensors each representing one title """
@@ -55,6 +57,7 @@ class TitlesAndAbstracts(object):
                 for word in words:
                     self.dictionay.add_word(word)
 
+        self.dictionay.add_word(TitlesAndAbstracts.unknown)
 
         with open(path, 'r') as f:
             for line in f:
