@@ -63,7 +63,7 @@ parser.add_argument('--beta', type=float, default=1,
                     help='beta slowness regularization applied on RNN activiation (beta = 0 means no regularization)')
 parser.add_argument('--wdecay', type=float, default=1.2e-6,
                     help='weight decay applied to all weights')
-parser.add_argument('--pretrained', type=str, default=randomhash+'.vec',
+parser.add_argument('--pretrained', type=str, default=None,
                     help='Pretrained word embeddings file to use')
 args = parser.parse_args()
 
@@ -157,7 +157,8 @@ def load_word_embeddings(model, filename, word2index):
     model.encoder.weight.data.copy_(torch.from_numpy(arr))
 
     test_loaded_word_embeddings(model, word2index)
-load_word_embeddings(model, args.pretrained, corpus.dictionary.word2idx)
+if args.pretrained:
+    load_word_embeddings(model, args.pretrained, corpus.dictionary.word2idx)
 
 def train():
     # Turn on training mode which enables dropout.
@@ -183,7 +184,6 @@ def train():
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
         hidden = repackage_hidden(hidden)
         optimizer.zero_grad()
-
         output, hidden, rnn_hs, dropped_rnn_hs = model(data, hidden, return_h=True)
         raw_loss = criterion(output.view(-1, ntokens), targets)
 
