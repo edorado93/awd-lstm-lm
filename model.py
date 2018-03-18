@@ -69,7 +69,6 @@ class RNNModel(nn.Module):
     def forward(self, input, hidden, return_h=False):
         emb = embedded_dropout(self.encoder, input, dropout=self.dropoute if self.training else 0)
         #emb = self.idrop(emb)
-
         emb = self.lockdrop(emb, self.dropouti)
 
         raw_output = emb
@@ -97,6 +96,12 @@ class RNNModel(nn.Module):
             return result, hidden, raw_outputs, outputs
         return result, hidden
 
+    """ Assumes that "hidden" is a Variable containing a tensor of dimension (1 * X). Basically this is the output of the encoder. """
+    def package_hidden(self, bsz, hidden):
+        hidden_states_default = self.init_hidden(bsz)
+        hidden_states_default[0] = (hidden.view(1, bsz, hidden.size(1)), hidden.view(1, bsz, hidden.size(1)))
+        return hidden_states_default
+
     def init_hidden(self, bsz):
         weight = next(self.parameters()).data
         if self.rnn_type == 'LSTM':
@@ -106,3 +111,39 @@ class RNNModel(nn.Module):
         elif self.rnn_type == 'QRNN' or self.rnn_type == 'GRU':
             return [Variable(weight.new(1, bsz, self.nhid if l != self.nlayers - 1 else (self.ninp if self.tie_weights else self.nhid)).zero_())
                     for l in range(self.nlayers)]
+
+class Encoder(nn.Module):
+    def __init__(self, embeddings, emdim, hidden_size, is_cuda):
+        super(Encoder, self).__init__()
+        self.fc1 = nn.Linear(emdim, hidden_size)
+        self.tanh = nn.Tanh()
+        self.embeddings = embeddings
+        self.is_cuda = is_cuda
+
+    def forward(self, sentence):
+        x = self.combine_word_embeddings(sentence)
+        out = self.fc1(x)
+        out = self.tanh(out)
+        return out
+
+    def combine_word_embeddings(self, sentence):
+        embeddings = [self.embeddings(Variable((torch.LongTensor([w])).cuda()) if self.is_cuda else Variable(torch.LongTensor([w]))) for w in sentence]
+        stacked_embedding = torch.cat(embeddings)
+        return torch.mean(stacked_embedding, 0, True)
+
+
+class Seq2Seq(nn.Module):
+    def __init__(self, rnn_type, ntoken, ninp, nhid, nlayers, dropout=0.5, dropouth=0.5, dropouti=0.5, dropoute=0.1,
+                 wdrop=0, tie_weights=False, cuda=False):
+        super(Seq2Seq, self).__init__()
+        self.decoder = RNNModel(rnn_type, ntoken, ninp, nhid, nlayers, dropout, dropouth, dropouti, dropoute, wdrop,
+                                tie_weights)
+        self.encoder = Encoder((self.decoder).encoder, ninp, nhid, cuda)
+
+    def forward(self, title, abstract, return_h=False):
+        hidden_context_BOW = self.encoder(title)
+        hidden_context_BOW = self.decoder.package_hidden(1, hidden_context_BOW)
+        data, targets = Variable(abstract[:-1].view(len(abstract) - 1, -1)), Variable(abstract[1:].view(-1))
+        return_values = self.decoder(data, hidden_context_BOW, return_h)
+        return return_values
+
