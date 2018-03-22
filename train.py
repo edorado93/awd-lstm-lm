@@ -80,7 +80,7 @@ titles_abstracts_corpus = TitlesAndAbstracts(args.data)
 eval_batch_size = 10
 test_batch_size = 1
 title_train, title_valid, title_test, abstracts_train, abstracts_valid, abstracts_test = titles_abstracts_corpus.cudify(args.batch_size)
-num_tokens = len(titles_abstracts_corpus.dictionay.word2idx.keys())
+num_tokens = len(titles_abstracts_corpus.dictionary.word2idx.keys())
 nlg_model = model.Seq2Seq(args.model, num_tokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.dropouth, args.dropouti, args.dropoute, args.wdrop, args.tied, args.cuda)
 if args.cuda:
     nlg_model.cuda()
