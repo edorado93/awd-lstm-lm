@@ -2,6 +2,7 @@ import os
 import torch
 
 from collections import Counter
+import nltk
 
 
 class Dictionary(object):
@@ -27,9 +28,14 @@ class Dictionary(object):
 class Corpus(object):
     def __init__(self, path):
         self.dictionary = Dictionary()
-        self.train = self.tokenize(os.path.join(path, 'train.txt'))
-        self.valid = self.tokenize(os.path.join(path, 'valid.txt'))
-        self.test = self.tokenize(os.path.join(path, 'test.txt'))
+        self.train = self.tokenize(os.path.join(path, 'corpus_train.txt'))
+        self.valid = self.tokenize(os.path.join(path, 'corpus_valid.txt'))
+        self.test = self.tokenize(os.path.join(path, 'corpus_test.txt'))
+
+    def lower(self, word):
+        if word.isupper():
+            return word
+        return word.lower()
 
     def tokenize(self, path):
         """Tokenizes a text file."""
@@ -38,11 +44,14 @@ class Corpus(object):
         with open(path, 'r') as f:
             tokens = 0
             for line in f:
-                words = line.split()
-                tokens += len(words)
-                if '----------------------------------------------------' in words:
+
+                if '----------' in line:
                     self.dictionary.add_word('<eos>')
+                    tokens += 1
                     continue
+
+                words = nltk.word_tokenize(line)
+                tokens += len(words)
                 for word in words:
                     self.dictionary.add_word(word)
 
@@ -51,8 +60,8 @@ class Corpus(object):
             ids = torch.LongTensor(tokens)
             token = 0
             for line in f:
-                words = line.split()
-                if '----------------------------------------------------' in words:
+                words = nltk.word_tokenize(line)
+                if '----------' in line:
                     words = ['<eos>']
                 for word in words:
                     ids[token] = self.dictionary.word2idx[word]
