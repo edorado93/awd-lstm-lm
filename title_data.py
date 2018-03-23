@@ -1,5 +1,6 @@
 import os
 import torch
+import nltk
 
 from collections import Counter
 
@@ -25,9 +26,10 @@ class Dictionary(object):
 class TitlesAndAbstracts(object):
 
     unknown = 'UNK'
+    end_of_sequence = '<eos>'
 
     def __init__(self, path):
-        self.dictionay = Dictionary()
+        self.dictionary = Dictionary()
 
         self.title_train = self.tokenize_titles(os.path.join(path, 'titles_train.txt'))
         self.title_valid = self.tokenize_titles(os.path.join(path, 'titles_valid.txt'))
@@ -38,13 +40,13 @@ class TitlesAndAbstracts(object):
         self.corpus_test = self.tokenize_abstracts(os.path.join(path, 'corpus_test.txt'))
 
     def tokenize_test_title(self, title):
-        words = title.split()
+        words = nltk.word_tokenize(title)
         title_tensor = torch.LongTensor(len(words))
         for i, word in enumerate(words):
-            if word in self.dictionay.word2idx:
-                title_tensor[i] = self.dictionay.word2idx[word]
+            if word in self.dictionary.word2idx:
+                title_tensor[i] = self.dictionary.word2idx[word]
             else:
-                title_tensor[i] = self.dictionay.word2idx[TitlesAndAbstracts.unknown]
+                title_tensor[i] = self.dictionary.word2idx[TitlesAndAbstracts.unknown]
         return title_tensor
 
     """ Returns a list of LongTensors each representing one title """
@@ -53,18 +55,18 @@ class TitlesAndAbstracts(object):
         titles = []
         with open(path, 'r') as f:
             for line in f:
-                words = line.split()
+                words = nltk.word_tokenize(line)
                 for word in words:
-                    self.dictionay.add_word(word)
+                    self.dictionary.add_word(word)
 
-        self.dictionay.add_word(TitlesAndAbstracts.unknown)
+        self.dictionary.add_word(TitlesAndAbstracts.unknown)
 
         with open(path, 'r') as f:
             for line in f:
-                words = line.split()
+                words = nltk.word_tokenize(line)
                 title = torch.LongTensor(len(words))
                 for i, word in enumerate(words):
-                    title[i] = self.dictionay.word2idx[word]
+                    title[i] = self.dictionary.word2idx[word]
                 titles.append(title)
 
         return titles
@@ -75,23 +77,25 @@ class TitlesAndAbstracts(object):
         abstracts = []
         with open(path, 'r') as f:
             for line in f:
-                words = line.split()
-                if '----------' in words:
+                words = nltk.word_tokenize(line)
+                if '----------' in line:
+                    self.dictionary.add_word(TitlesAndAbstracts.end_of_sequence)
                     continue
                 for word in words:
-                    self.dictionay.add_word(word)
+                    self.dictionary.add_word(word)
 
         # Tokenize file content
         with open(path, 'r') as f:
             single_abstract = []
             for line in f:
-                words = line.split()
-                if '----------' in words:
+                words = nltk.word_tokenize(line)
+                if '----------' in line:
+                    single_abstract.append(self.dictionary.word2idx[TitlesAndAbstracts.end_of_sequence])
                     abstracts.append(torch.LongTensor(single_abstract))
                     single_abstract = []
                     continue
                 for word in words:
-                    single_abstract.append(self.dictionay.word2idx[word])
+                    single_abstract.append(self.dictionary.word2idx[word])
 
         return abstracts
 
