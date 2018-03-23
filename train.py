@@ -6,6 +6,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 
 from title_data import TitlesAndAbstracts
+from gensim.models import KeyedVectors
 import model
 
 import numpy as np
@@ -60,7 +61,7 @@ parser.add_argument('--beta', type=float, default=1,
                     help='beta slowness regularization applied on RNN activiation (beta = 0 means no regularization)')
 parser.add_argument('--wdecay', type=float, default=1.2e-6,
                     help='weight decay applied to all weights')
-parser.add_argument('--pretrained', type=str, default=randomhash+'.vec',
+parser.add_argument('--pretrained', type=str, default=None,
                     help='Pretrained word embeddings file to use')
 args = parser.parse_args()
 
@@ -106,6 +107,29 @@ def evaluate(titles, abstracts, batch_size=10):
 
 
     return total_loss[0] / len(titles)
+
+def load_word_embeddings(model, filename, word2index):
+    print("Copying pretrained word embeddings from ", filename)
+    en_model = KeyedVectors.load_word2vec_format(filename)
+    """ Fetching all of the words in the vocabulary. """
+    pretrained_words = set()
+    for word in en_model.vocab:
+        pretrained_words.add(word)
+
+    arr = [0] * len(word2index)
+    for word in word2index:
+        index = word2index[word]
+        if word in pretrained_words:
+            arr[index] = en_model[word]
+        else:
+            arr[index] = np.random.uniform(-1.0, 1.0, args.emsize)
+
+    """ Creating a numpy dictionary for the index -> embedding mapping """
+    arr = np.array(arr)
+    """ Add the word embeddings to the empty PyTorch Embedding object """
+    model.load_word_embeddings(torch.from_numpy(arr))
+if args.pretrained:
+    load_word_embeddings(nlg_model, args.pretrained, titles_abstracts_corpus.dictionary.word2idx)
 
 def train():
     global title_train

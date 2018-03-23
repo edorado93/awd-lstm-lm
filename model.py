@@ -140,6 +140,9 @@ class Seq2Seq(nn.Module):
                                 tie_weights)
         self.encoder = Encoder((self.decoder).encoder, ninp, nhid, cuda)
 
+    def load_word_embeddings(self, new_embeddings):
+        self.decoder.encoder.weight.data.copy_(new_embeddings)
+
     def forward(self, title, abstract, return_h=False):
         hidden_context_BOW = self.encoder(title)
         hidden_context_BOW = self.decoder.package_hidden(1, hidden_context_BOW)
