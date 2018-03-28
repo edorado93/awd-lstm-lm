@@ -28,6 +28,8 @@ parser.add_argument('--log-interval', type=int, default=100,
                     help='reporting interval')
 parser.add_argument('--title', type=str, default=None,
                     help='The title for which the abstract is to be generated')
+parser.add_argument('--encoder', type=str, default="BOW",
+                    help='The encoder model that was used during training')
 
 args = parser.parse_args()
 
@@ -54,7 +56,7 @@ titles_abstracts_corpus = TitlesAndAbstracts(args.data)
 encoder = model.encoder
 decoder = model.decoder
 title_tensor = titles_abstracts_corpus.tokenize_test_title(args.title)
-ntokens = len(titles_abstracts_corpus.corpus_dictionary.word2idx.keys())
+ntokens = len(titles_abstracts_corpus.dictionary.word2idx.keys())
 input_tensor = torch.rand(1, 1).mul(ntokens).long()
 
 if args.cuda:
@@ -62,8 +64,16 @@ if args.cuda:
     input_tensor = input_tensor.cuda()
 
 input = Variable(input_tensor, volatile=True)
-hidden_context_BOW = encoder(title_tensor)
-hidden_context_BOW = decoder.package_hidden(1, hidden_context_BOW)
+
+
+if args.encoder == "LSTM":
+    encoder_output, hidden_context = encoder(Variable(title_tensor.view(len(title_tensor), -1)), encoder.init_hidden(1), return_h=False)
+    h1, h2 = hidden_context[-1]
+    hidden_context_BOW = decoder.init_hidden(1)
+    hidden_context_BOW[0] = (h1, h2)
+else:
+    hidden_context_BOW = encoder(title_tensor)
+    hidden_context_BOW = decoder.package_hidden(1, hidden_context_BOW)
 
 with open(args.outf, 'w') as outf:
     for i in range(args.words):
@@ -71,8 +81,7 @@ with open(args.outf, 'w') as outf:
         word_weights = output.squeeze().data.div(args.temperature).exp().cpu()
         word_idx = torch.multinomial(word_weights, 1)[0]
         input.data.fill_(word_idx)
-        print(len(word_weights), word_idx, len(titles_abstracts_corpus.corpus_dictionary.idx2word), len(titles_abstracts_corpus.title_dictionary.idx2word))
-        word = titles_abstracts_corpus.corpus_dictionary.idx2word[word_idx]
+        word = titles_abstracts_corpus.dictionary.idx2word[word_idx]
 
         outf.write(word + ('\n' if i % 20 == 19 else ' '))
 

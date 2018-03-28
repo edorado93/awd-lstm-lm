@@ -133,22 +133,32 @@ class Encoder(nn.Module):
 
 
 class Seq2Seq(nn.Module):
-    def __init__(self, rnn_type, ntoken, ninp, nhid, nlayers, dropout=0.5, dropouth=0.5, dropouti=0.5, dropoute=0.1,
+    def __init__(self, rnn_type, encoder, ntoken, ninp, nhid, nlayers, dropout=0.5, dropouth=0.5, dropouti=0.5, dropoute=0.1,
                  wdrop=0, tie_weights=False, cuda=False):
         super(Seq2Seq, self).__init__()
-        self.decoder = RNNModel(rnn_type, ntoken, ninp, nhid, nlayers, dropout, dropouth, dropouti, dropoute, wdrop,
-                                tie_weights)
-        self.encoder = RNNModel(rnn_type, ntoken, ninp, nhid, nlayers, dropout, dropouth, dropouti, dropoute, wdrop,
+        self.endoder_model = encoder
+        if encoder == "BOW":
+            self.decoder = RNNModel(rnn_type, ntoken, ninp, nhid, nlayers, dropout, dropouth, dropouti, dropoute, wdrop,
+                                    tie_weights)
+            self.encoder = Encoder((self.decoder).encoder, ninp, nhid, cuda)
+        else:
+            self.decoder = RNNModel(rnn_type, ntoken, ninp, nhid, nlayers, dropout, dropouth, dropouti, dropoute, wdrop,
+                                    tie_weights)
+            self.encoder = RNNModel(rnn_type, ntoken, ninp, nhid, nlayers, dropout, dropouth, dropouti, dropoute, wdrop,
                                 tie_weights=False)
 
     def load_word_embeddings(self, new_embeddings):
         self.decoder.encoder.weight.data.copy_(new_embeddings)
 
     def forward(self, title, abstract, return_h=False):
-        _, hidden_context = self.encoder(Variable(title.view(len(title), -1)), self.encoder.init_hidden(1), return_h=False)
-        h1, h2 = hidden_context[-1]
-        hidden_layer = self.decoder.init_hidden(1)
-        hidden_layer[0] = (h1, h2)
+        if self.endoder_model == "LSTM":
+            encoder_output, hidden_context = self.encoder(Variable(title.view(len(title), -1)), self.encoder.init_hidden(1), return_h=False)
+            h1, h2 = hidden_context[-1]
+            hidden_layer = self.decoder.init_hidden(1)
+            hidden_layer[0] = (h1, h2)
+        else:
+            hidden_layer = self.encoder(title)
+            hidden_layer = self.decoder.package_hidden(1, hidden_layer)
         data, targets = Variable(abstract[:-1].view(len(abstract) - 1, -1)), Variable(abstract[1:].view(-1))
         return_values = self.decoder(data, hidden_layer, return_h)
         return return_values
