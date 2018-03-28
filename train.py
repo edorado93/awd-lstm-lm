@@ -140,6 +140,7 @@ def train():
     total_loss = 0
     start_time = time.time()
     batch, i = 0, 0
+    loss = None; assign_loss = True
     while i < len(title_train):
         seq_len = 1
 
@@ -148,6 +149,7 @@ def train():
             torch.nn.utils.clip_grad_norm(nlg_model.parameters(), args.clip)
             optimizer.step()
             optimizer.zero_grad()
+            assign_loss = True
 
         lr2 = optimizer.param_groups[0]['lr']
         optimizer.param_groups[0]['lr'] = lr2 * seq_len / args.bptt
@@ -159,7 +161,7 @@ def train():
         output, hidden, rnn_hs, dropped_rnn_hs = nlg_model(title, abstract, return_h=True)
         raw_loss = criterion(output.view(-1, num_tokens), targets)
 
-        loss = raw_loss
+        loss = raw_loss if assign_loss else (loss + raw_loss)
         # Activiation Regularization
         loss = loss + sum(args.alpha * dropped_rnn_h.pow(2).mean() for dropped_rnn_h in dropped_rnn_hs[-1:])
         # Temporal Activation Regularization (slowness)
