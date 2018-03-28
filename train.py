@@ -63,6 +63,8 @@ parser.add_argument('--wdecay', type=float, default=1.2e-6,
                     help='weight decay applied to all weights')
 parser.add_argument('--pretrained', type=str, default=None,
                     help='Pretrained word embeddings file to use')
+parser.add_argument('--encoder', type=str, default="BOW",
+                    help="Encoder model to use (LSTM, BOW)")
 args = parser.parse_args()
 
 # Set the random seed manually for reproducibility.
@@ -82,7 +84,7 @@ eval_batch_size = 10
 test_batch_size = 1
 title_train, title_valid, title_test, abstracts_train, abstracts_valid, abstracts_test = titles_abstracts_corpus.cudify(args.batch_size)
 num_tokens = len(titles_abstracts_corpus.dictionary.word2idx.keys())
-nlg_model = model.Seq2Seq(args.model, num_tokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.dropouth, args.dropouti, args.dropoute, args.wdrop, args.tied, args.cuda)
+nlg_model = model.Seq2Seq(args.model, args.encoder, num_tokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.dropouth, args.dropouti, args.dropoute, args.wdrop, args.tied, args.cuda)
 if args.cuda:
     nlg_model.cuda()
 total_params = sum(x.size()[0] * x.size()[1] if len(x.size()) > 1 else x.size()[0] for x in nlg_model.parameters())
@@ -141,12 +143,18 @@ def train():
     while i < len(title_train):
         seq_len = 1
 
+        if batch > 0 and batch % args.batch_size == 0:
+            loss.backward()
+            torch.nn.utils.clip_grad_norm(nlg_model.parameters(), args.clip)
+            optimizer.step()
+            optimizer.zero_grad()
+
         lr2 = optimizer.param_groups[0]['lr']
         optimizer.param_groups[0]['lr'] = lr2 * seq_len / args.bptt
         nlg_model.train()
         title, abstract =  title_train[i], abstracts_train[i] # One at a time
         targets = Variable(abstract[1:].view(-1))
-        optimizer.zero_grad()
+        # optimizer.zero_grad()
 
         output, hidden, rnn_hs, dropped_rnn_hs = nlg_model(title, abstract, return_h=True)
         raw_loss = criterion(output.view(-1, num_tokens), targets)
@@ -156,11 +164,11 @@ def train():
         loss = loss + sum(args.alpha * dropped_rnn_h.pow(2).mean() for dropped_rnn_h in dropped_rnn_hs[-1:])
         # Temporal Activation Regularization (slowness)
         loss = loss + sum(args.beta * (rnn_h[1:] - rnn_h[:-1]).pow(2).mean() for rnn_h in rnn_hs[-1:])
-        loss.backward()
+        # loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
-        torch.nn.utils.clip_grad_norm(nlg_model.parameters(), args.clip)
-        optimizer.step()
+        # torch.nn.utils.clip_grad_norm(nlg_model.parameters(), args.clip)
+        # optimizer.step()
 
         total_loss += raw_loss.data
         optimizer.param_groups[0]['lr'] = lr2
