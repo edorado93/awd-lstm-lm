@@ -56,6 +56,8 @@ class RNNModel(nn.Module):
         self.dropouth = dropouth
         self.dropoute = dropoute
         self.tie_weights = tie_weights
+        self.A = Variable(torch.randn(1), requires_grad=True).cuda()
+        self.B = Variable(torch.randn(1), requires_grad=True).cuda()
 
     def reset(self):
         if self.rnn_type == 'QRNN': [r.reset() for r in self.rnns]
@@ -66,20 +68,20 @@ class RNNModel(nn.Module):
         self.decoder.bias.data.fill_(0)
         self.decoder.weight.data.uniform_(-initrange, initrange)
 
-    def context_apply(self, context, abstract):
-        for index in range(abstract.size(0)):
-            embedding = abstract[0].view(1,1,-1)
-            embedding = torch.cat([embedding, context])
-            mean = torch.mean(embedding, 0, True)
-            abstract[0] = mean.view(1, -1)
-        return abstract
+    def context_apply(self, context, abstract, type):
+        if type == "learned":
+            return torch.mul(context, self.A) + torch.mul(abstract, self.B)
+        elif type == "sum":
+            return context + abstract
+        else:
+            return torch.div(context + abstract, 2.0)
 
     def forward(self, input, hidden, return_h=False, context=None, is_context_available=False):
         emb = embedded_dropout(self.encoder, input, dropout=self.dropoute if self.training else 0)
         #emb = self.idrop(emb)
         emb = self.lockdrop(emb, self.dropouti)
         if is_context_available:
-            emb = self.context_apply(context, emb)
+            emb = self.context_apply(context, emb, "mean")
 
         raw_output = emb
         new_hidden = []
@@ -166,7 +168,6 @@ class Seq2Seq(nn.Module):
             encoder_output, encoder_context = self.encoder(Variable(title.view(len(title), -1)), self.encoder.init_hidden(1), return_h=False)
             h1, h2 = encoder_context[-1]
             hidden_layer = self.decoder.init_hidden(1)
-            hidden_layer[0] = (h1, h2)
             encoder_context = h1
         else:
             hidden_layer = self.encoder(title)
