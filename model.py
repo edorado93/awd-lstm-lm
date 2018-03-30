@@ -74,11 +74,12 @@ class RNNModel(nn.Module):
             abstract[0] = mean.view(1, -1)
         return abstract
 
-    def forward(self, input, hidden, return_h=False):
+    def forward(self, input, hidden, return_h=False, context=None, is_context_available=False):
         emb = embedded_dropout(self.encoder, input, dropout=self.dropoute if self.training else 0)
         #emb = self.idrop(emb)
         emb = self.lockdrop(emb, self.dropouti)
-        emb = self.context_apply(hidden[0][0], emb)
+        if is_context_available:
+            emb = self.context_apply(context, emb)
 
         raw_output = emb
         new_hidden = []
@@ -160,15 +161,17 @@ class Seq2Seq(nn.Module):
         self.decoder.encoder.weight.data.copy_(new_embeddings)
 
     def forward(self, title, abstract, return_h=False):
+        encoder_context = None
         if self.endoder_model == "LSTM":
-            encoder_output, hidden_context = self.encoder(Variable(title.view(len(title), -1)), self.encoder.init_hidden(1), return_h=False)
-            h1, h2 = hidden_context[-1]
+            encoder_output, encoder_context = self.encoder(Variable(title.view(len(title), -1)), self.encoder.init_hidden(1), return_h=False)
+            h1, h2 = encoder_context[-1]
             hidden_layer = self.decoder.init_hidden(1)
             hidden_layer[0] = (h1, h2)
+            encoder_context = h1
         else:
             hidden_layer = self.encoder(title)
             hidden_layer = self.decoder.package_hidden(1, hidden_layer)
         data, targets = Variable(abstract[:-1].view(len(abstract) - 1, -1)), Variable(abstract[1:].view(-1))
-        return_values = self.decoder(data, hidden_layer, return_h)
+        return_values = self.decoder(data, hidden_layer, return_h, encoder_context, is_context_available=True)
         return return_values
 
