@@ -66,10 +66,19 @@ class RNNModel(nn.Module):
         self.decoder.bias.data.fill_(0)
         self.decoder.weight.data.uniform_(-initrange, initrange)
 
+    def context_apply(self, context, abstract):
+        for index in range(abstract.size(0)):
+            embedding = abstract[0].view(1,1,-1)
+            embedding = torch.cat([embedding, context])
+            mean = torch.mean(embedding, 0, True)
+            abstract[0] = mean.view(1, -1)
+        return abstract
+
     def forward(self, input, hidden, return_h=False):
         emb = embedded_dropout(self.encoder, input, dropout=self.dropoute if self.training else 0)
         #emb = self.idrop(emb)
         emb = self.lockdrop(emb, self.dropouti)
+        emb = self.context_apply(hidden[0][0], emb)
 
         raw_output = emb
         new_hidden = []
@@ -145,7 +154,7 @@ class Seq2Seq(nn.Module):
             self.decoder = RNNModel(rnn_type, ntoken, ninp, nhid, nlayers, dropout, dropouth, dropouti, dropoute, wdrop,
                                     tie_weights)
             self.encoder = RNNModel(rnn_type, ntoken, ninp, nhid, nlayers, dropout, dropouth, dropouti, dropoute, wdrop,
-                                tie_weights=False)
+                                tie_weights=True)
 
     def load_word_embeddings(self, new_embeddings):
         self.decoder.encoder.weight.data.copy_(new_embeddings)
