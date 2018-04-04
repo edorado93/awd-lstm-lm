@@ -156,7 +156,6 @@ def train():
         nlg_model.train()
         title, abstract =  title_train[i], abstracts_train[i] # One at a time
         targets = Variable(abstract[1:].view(-1))
-        # optimizer.zero_grad()
 
         output, hidden, rnn_hs, dropped_rnn_hs = nlg_model(title, abstract, return_h=True)
         raw_loss = criterion(output.view(-1, num_tokens), targets)
@@ -166,11 +165,6 @@ def train():
         loss = loss + sum(args.alpha * dropped_rnn_h.pow(2).mean() for dropped_rnn_h in dropped_rnn_hs[-1:])
         # Temporal Activation Regularization (slowness)
         loss = loss + sum(args.beta * (rnn_h[1:] - rnn_h[:-1]).pow(2).mean() for rnn_h in rnn_hs[-1:])
-        # loss.backward()
-
-        # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
-        # torch.nn.utils.clip_grad_norm(nlg_model.parameters(), args.clip)
-        # optimizer.step()
 
         total_loss += raw_loss.data
         optimizer.param_groups[0]['lr'] = lr2
