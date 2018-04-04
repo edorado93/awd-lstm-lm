@@ -25,11 +25,14 @@ class Dictionary(object):
 
 class TitlesAndAbstracts(object):
 
-    unknown = 'UNK'
+    unknown = '<unk>'
     end_of_sequence = '<eos>'
 
     def __init__(self, path):
         self.dictionary = Dictionary()
+
+        self.dictionary.add_word(TitlesAndAbstracts.unknown)
+        self.dictionary.add_word(TitlesAndAbstracts.end_of_sequence)
 
         self.title_train = self.tokenize_titles(os.path.join(path, 'titles_train.txt'))
         self.title_valid = self.tokenize_titles(os.path.join(path, 'titles_valid.txt'))
@@ -58,8 +61,6 @@ class TitlesAndAbstracts(object):
                 words = nltk.word_tokenize(line)
                 for word in words:
                     self.dictionary.add_word(word)
-
-        self.dictionary.add_word(TitlesAndAbstracts.unknown)
 
         with open(path, 'r') as f:
             for line in f:

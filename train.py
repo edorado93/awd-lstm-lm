@@ -64,7 +64,7 @@ parser.add_argument('--wdecay', type=float, default=1.2e-6,
 parser.add_argument('--pretrained', type=str, default=None,
                     help='Pretrained word embeddings file to use')
 parser.add_argument('--encoder', type=str, default="BOW",
-                    help = "Encoder model to use from (BOW, LSTM)")
+                    help="Encoder model to use (LSTM, BOW)")
 args = parser.parse_args()
 
 # Set the random seed manually for reproducibility.
@@ -140,29 +140,31 @@ def train():
     total_loss = 0
     start_time = time.time()
     batch, i = 0, 0
+    loss = None; assign_loss = True
     while i < len(title_train):
         seq_len = 1
+
+        if batch > 0 and batch % args.batch_size == 0:
+            loss.backward()
+            torch.nn.utils.clip_grad_norm(nlg_model.parameters(), args.clip)
+            optimizer.step()
+            optimizer.zero_grad()
+            assign_loss = True
 
         lr2 = optimizer.param_groups[0]['lr']
         optimizer.param_groups[0]['lr'] = lr2 * seq_len / args.bptt
         nlg_model.train()
         title, abstract =  title_train[i], abstracts_train[i] # One at a time
         targets = Variable(abstract[1:].view(-1))
-        optimizer.zero_grad()
 
         output, hidden, rnn_hs, dropped_rnn_hs = nlg_model(title, abstract, return_h=True)
         raw_loss = criterion(output.view(-1, num_tokens), targets)
 
-        loss = raw_loss
+        loss = raw_loss if assign_loss else (loss + raw_loss)
         # Activiation Regularization
         loss = loss + sum(args.alpha * dropped_rnn_h.pow(2).mean() for dropped_rnn_h in dropped_rnn_hs[-1:])
         # Temporal Activation Regularization (slowness)
         loss = loss + sum(args.beta * (rnn_h[1:] - rnn_h[:-1]).pow(2).mean() for rnn_h in rnn_hs[-1:])
-        loss.backward()
-
-        # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
-        torch.nn.utils.clip_grad_norm(nlg_model.parameters(), args.clip)
-        optimizer.step()
 
         total_loss += raw_loss.data
         optimizer.param_groups[0]['lr'] = lr2
