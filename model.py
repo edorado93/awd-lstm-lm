@@ -76,12 +76,12 @@ class RNNModel(nn.Module):
         else:
             return torch.div(context + abstract, 2.0)
 
-    def forward(self, input, hidden, return_h=False, context=None, is_context_available=False):
+    def forward(self, input, hidden, return_h=False, context=None, is_context_available=False, concat_type="sum"):
         emb = embedded_dropout(self.encoder, input, dropout=self.dropoute if self.training else 0)
         #emb = self.idrop(emb)
         emb = self.lockdrop(emb, self.dropouti)
         if is_context_available:
-            emb = self.context_apply(context, emb, "mean")
+            emb = self.context_apply(context, emb, concat_type)
 
         raw_output = emb
         new_hidden = []
@@ -146,9 +146,11 @@ class Encoder(nn.Module):
 
 class Seq2Seq(nn.Module):
     def __init__(self, rnn_type, encoder, ntoken, ninp, nhid, nlayers, dropout=0.5, dropouth=0.5, dropouti=0.5, dropoute=0.1,
-                 wdrop=0, tie_weights=False, cuda=False):
+                 wdrop=0, tie_weights=False, cuda=False, title_abstract_concat=False, title_abstract_concat_type="sum"):
         super(Seq2Seq, self).__init__()
         self.endoder_model = encoder
+        self.title_abstract_concat = title_abstract_concat
+        self.title_abstract_concat_type = title_abstract_concat_type
         if encoder == "BOW":
             self.decoder = RNNModel(rnn_type, ntoken, ninp, nhid, nlayers, dropout, dropouth, dropouti, dropoute, wdrop,
                                     tie_weights)
@@ -164,6 +166,7 @@ class Seq2Seq(nn.Module):
 
     def forward(self, title, abstract, return_h=False):
         encoder_context = None
+        """ The encoder context would only be available in case of the LSTM based encoder.  """
         if self.endoder_model == "LSTM":
             encoder_output, encoder_context = self.encoder(Variable(title.view(len(title), -1)), self.encoder.init_hidden(1), return_h=False)
             h1, h2 = encoder_context[-1]
@@ -173,6 +176,7 @@ class Seq2Seq(nn.Module):
             hidden_layer = self.encoder(title)
             hidden_layer = self.decoder.package_hidden(1, hidden_layer)
         data, targets = Variable(abstract[:-1].view(len(abstract) - 1, -1)), Variable(abstract[1:].view(-1))
-        return_values = self.decoder(data, hidden_layer, return_h, encoder_context, is_context_available=True)
+        return_values = self.decoder(data, hidden_layer, return_h, encoder_context,
+                                     is_context_available=self.title_abstract_concat, concat_type=self.title_abstract_concat_type)
         return return_values
 
