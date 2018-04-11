@@ -56,6 +56,8 @@ class RNNModel(nn.Module):
         self.dropouth = dropouth
         self.dropoute = dropoute
         self.tie_weights = tie_weights
+        self.A = Variable(torch.randn(1), requires_grad=True).cuda()
+        self.B = Variable(torch.randn(1), requires_grad=True).cuda()
 
     def reset(self):
         if self.rnn_type == 'QRNN': [r.reset() for r in self.rnns]
@@ -66,10 +68,20 @@ class RNNModel(nn.Module):
         self.decoder.bias.data.fill_(0)
         self.decoder.weight.data.uniform_(-initrange, initrange)
 
-    def forward(self, input, hidden, return_h=False):
+    def context_apply(self, context, abstract, type):
+        if type == "learned":
+            return torch.mul(context, self.A) + torch.mul(abstract, self.B)
+        elif type == "sum":
+            return context + abstract
+        else:
+            return torch.div(context + abstract, 2.0)
+
+    def forward(self, input, hidden, return_h=False, context=None, is_context_available=False, concat_type="sum"):
         emb = embedded_dropout(self.encoder, input, dropout=self.dropoute if self.training else 0)
         #emb = self.idrop(emb)
         emb = self.lockdrop(emb, self.dropouti)
+        if is_context_available:
+            emb = self.context_apply(context, emb, concat_type)
 
         raw_output = emb
         new_hidden = []
@@ -134,9 +146,11 @@ class Encoder(nn.Module):
 
 class Seq2Seq(nn.Module):
     def __init__(self, rnn_type, encoder, ntoken, ninp, nhid, nlayers, dropout=0.5, dropouth=0.5, dropouti=0.5, dropoute=0.1,
-                 wdrop=0, tie_weights=False, cuda=False):
+                 wdrop=0, tie_weights=False, cuda=False, title_abstract_concat=False, title_abstract_concat_type="sum"):
         super(Seq2Seq, self).__init__()
         self.endoder_model = encoder
+        self.title_abstract_concat = title_abstract_concat
+        self.title_abstract_concat_type = title_abstract_concat_type
         if encoder == "BOW":
             self.decoder = RNNModel(rnn_type, ntoken, ninp, nhid, nlayers, dropout, dropouth, dropouti, dropoute, wdrop,
                                     tie_weights)
@@ -145,21 +159,24 @@ class Seq2Seq(nn.Module):
             self.decoder = RNNModel(rnn_type, ntoken, ninp, nhid, nlayers, dropout, dropouth, dropouti, dropoute, wdrop,
                                     tie_weights)
             self.encoder = RNNModel(rnn_type, ntoken, ninp, nhid, nlayers, dropout, dropouth, dropouti, dropoute, wdrop,
-                                tie_weights=False)
+                                tie_weights=True)
 
     def load_word_embeddings(self, new_embeddings):
         self.decoder.encoder.weight.data.copy_(new_embeddings)
 
     def forward(self, title, abstract, return_h=False):
+        encoder_context = None
+        """ The encoder context would only be available in case of the LSTM based encoder.  """
         if self.endoder_model == "LSTM":
-            encoder_output, hidden_context = self.encoder(Variable(title.view(len(title), -1)), self.encoder.init_hidden(1), return_h=False)
-            h1, h2 = hidden_context[-1]
+            encoder_output, encoder_context = self.encoder(Variable(title.view(len(title), -1)), self.encoder.init_hidden(1), return_h=False)
+            h1, h2 = encoder_context[-1]
             hidden_layer = self.decoder.init_hidden(1)
-            hidden_layer[0] = (h1, h2)
+            encoder_context = h1
         else:
             hidden_layer = self.encoder(title)
             hidden_layer = self.decoder.package_hidden(1, hidden_layer)
         data, targets = Variable(abstract[:-1].view(len(abstract) - 1, -1)), Variable(abstract[1:].view(-1))
-        return_values = self.decoder(data, hidden_layer, return_h)
+        return_values = self.decoder(data, hidden_layer, return_h, encoder_context,
+                                     is_context_available=self.title_abstract_concat, concat_type=self.title_abstract_concat_type)
         return return_values
 
