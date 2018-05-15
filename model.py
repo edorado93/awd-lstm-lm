@@ -175,6 +175,7 @@ class Seq2Seq(nn.Module):
         self.decoder = LSTMDecoder(system_args, num_tokens)
         self.encoder = LSTMEncoder(system_args, num_tokens)
         self.encoder_model = system_args.encoder
+        self.dim_change = nn.Linear(system_args.emsize, system_args.nhid)
 
     def load_word_embeddings(self, new_embeddings):
         self.decoder.embedding.weight.data.copy_(new_embeddings)
@@ -186,6 +187,7 @@ class Seq2Seq(nn.Module):
             encoder_output, encoder_context = self.encoder(Variable(title.view(len(title), -1)), self.encoder.init_hidden(1), return_h=False)
             h1, h2 = encoder_context[-1]
             hidden_layer = self.decoder.init_hidden(1)
+            hidden_layer[0] = (self.dim_change(h1), self.dim_change(h2))
             encoder_context = h1
         data, targets = Variable(abstract[:-1].view(len(abstract) - 1, -1)), Variable(abstract[1:].view(-1))
         return_values = self.decoder(data, hidden_layer, return_h, encoder_context,
