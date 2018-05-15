@@ -93,8 +93,7 @@ eval_batch_size = 10
 test_batch_size = 1
 title_train, title_valid, title_test, abstracts_train, abstracts_valid, abstracts_test = titles_abstracts_corpus.cudify(args.batch_size)
 num_tokens = len(titles_abstracts_corpus.dictionary.word2idx.keys())
-nlg_model = model.Seq2Seq(args.model, args.encoder, num_tokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.dropouth, args.dropouti, args.dropoute, args.wdrop, args.tied, args.cuda,
-                          args.title_abstract_concat, args.title_abstract_concat_type)
+nlg_model = model.Seq2Seq(args, num_tokens)
 if args.cuda:
     nlg_model.cuda()
 total_params = sum(x.size()[0] * x.size()[1] if len(x.size()) > 1 else x.size()[0] for x in nlg_model.parameters())
@@ -212,7 +211,7 @@ try:
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                     'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
-                                               val_loss2, math.exp(val_loss2) if val_loss2 <= 10 else -1))
+                                               val_loss2, math.exp(val_loss2) if val_loss2 <= 10 else -1), flush=True)
             print('-' * 89)
 
             if val_loss2 < stored_loss:
@@ -229,7 +228,7 @@ try:
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                     'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
-                                               val_loss, math.exp(val_loss) if val_loss <= 10 else -1))
+                                               val_loss, math.exp(val_loss) if val_loss <= 10 else -1), flush=True)
             print('-' * 89)
 
             if val_loss < stored_loss:
