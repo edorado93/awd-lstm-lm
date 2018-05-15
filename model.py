@@ -38,6 +38,7 @@ class LSTMEncoder(nn.Module):
         self.ninp = system_args.emsize
         self.nhid = system_args.nhid
         self.nlayers = system_args.nlayers
+        self.tie_weights = system_args.tied
 
     def init_weights(self):
         initrange = 0.1
@@ -113,6 +114,7 @@ class LSTMDecoder(nn.Module):
         self.ninp = system_args.emsize
         self.nhid = system_args.nhid
         self.nlayers = system_args.nlayers
+        self.tie_weights = system_args.tied
 
     def init_weights(self):
         initrange = 0.1
@@ -172,6 +174,7 @@ class Seq2Seq(nn.Module):
         self.title_abstract_concat_type = system_args.title_abstract_concat_type
         self.decoder = LSTMDecoder(system_args, num_tokens)
         self.encoder = LSTMEncoder(system_args, num_tokens)
+        self.encoder_model = system_args.encoder
 
     def load_word_embeddings(self, new_embeddings):
         self.decoder.embedding.weight.data.copy_(new_embeddings)
@@ -179,7 +182,7 @@ class Seq2Seq(nn.Module):
     def forward(self, title, abstract, return_h=False):
         encoder_context = None
         """ The encoder context would only be available in case of the LSTM based encoder.  """
-        if self.endoder_model == "LSTM":
+        if self.encoder_model == "LSTM":
             encoder_output, encoder_context = self.encoder(Variable(title.view(len(title), -1)), self.encoder.init_hidden(1), return_h=False)
             h1, h2 = encoder_context[-1]
             hidden_layer = self.decoder.init_hidden(1)
