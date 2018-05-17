@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 
 from embed_regularize import embedded_dropout
-from locked_dropout import LockedDropout
+from locked_dropout import LockedDropout, LockedDropoutLSTMCell
 from weight_drop import WeightDrop
 
 class LSTMEncoder(nn.Module):
@@ -86,6 +86,7 @@ class LSTMDecoder(nn.Module):
     def __init__(self, system_args, num_tokens):
         super(LSTMDecoder, self).__init__()
         rnn_type = system_args.model
+        self.lockdropLSTM = LockedDropoutLSTMCell()
         self.lockdrop = LockedDropout()
         self.idrop = nn.Dropout(system_args.dropouti)
         self.hdrop = nn.Dropout(system_args.dropouth)
@@ -93,11 +94,9 @@ class LSTMDecoder(nn.Module):
         self.embedding = nn.Embedding(num_tokens, system_args.emsize)
         assert rnn_type in ['LSTM', 'QRNN', 'GRU'], 'RNN type is not supported'
         if rnn_type == 'LSTM':
-            self.rnns = [torch.nn.LSTM(system_args.emsize if l == 0 else system_args.nhid, system_args.nhid if l != system_args.nlayers - 1 else (system_args.emsize if system_args.tied else system_args.nhid), 1, dropout=0) for l in range(system_args.nlayers)]
+            self.rnns = [torch.nn.LSTMCell(system_args.emsize if l == 0 else system_args.nhid, system_args.nhid if l != system_args.nlayers - 1 else (system_args.emsize if system_args.tied else system_args.nhid)) for l in range(system_args.nlayers)]
         if rnn_type == "GRU":
             self.rnns = [torch.nn.GRU(system_args.emsize if l == 0 else system_args.nhid, system_args.nhid if l != system_args.nlayers - 1 else system_args.emsize, 1, dropout=0) for l in range(system_args.nlayers)]
-        if system_args.wdrop:
-            self.rnns = [WeightDrop(rnn, ['weight_hh_l0'], dropout=system_args.wdrop) for rnn in self.rnns]
         print(self.rnns)
         self.rnns = torch.nn.ModuleList(self.rnns)
         self.final = nn.Linear(system_args.nhid, num_tokens)
@@ -135,36 +134,54 @@ class LSTMDecoder(nn.Module):
         if is_context_available:
             emb = self.context_apply(context, emb, concat_type)
 
-        raw_output = emb
-        new_hidden = []
-        raw_outputs = []
-        outputs = []
-        for l, rnn in enumerate(self.rnns):
-            raw_output, new_h = rnn(raw_output, hidden[l])
-            new_hidden.append(new_h)
-            raw_outputs.append(raw_output)
-            if l != self.nlayers - 1:
-                raw_output = self.lockdrop(raw_output, self.dropouth)
-                outputs.append(raw_output)
-        hidden = new_hidden
+        """ The number of words in the abstract """
+        seqlen = input.size()[0]
 
-        output = self.lockdrop(raw_output, self.dropout)
-        outputs.append(output)
+        raw_outputs = {l : [] for l in range(self.nlayers)}
+        outputs = {l : [] for l in range(self.nlayers)}
 
+        for j in range(seqlen):
+
+            """ The embedding for each word to be fed into the lstm """
+            rnn_input = emb[j, :, :]
+
+            for l, rnn in enumerate(self.rnns):
+                rnn_hidden, rnn_cell = rnn(rnn_input, hidden[l])
+
+                """ Updated hidden states of the LSTMCell according to the word currently fed """
+                hidden[l] = (rnn_hidden, rnn_cell)
+
+                """ Append the raw output for this layer and timestep i.e. word"""
+                raw_outputs[l].append(rnn_hidden.unsqueeze(0))
+
+                """ Apply dropoutH for this layer if this isn't the last layer and append to outputs. """
+                if l != self.nlayers - 1:
+                    rnn_input = self.lockdropLSTM(rnn_hidden, self.dropouth)
+                    outputs[l].append(rnn_input.unsqueeze(0))
+
+            output = self.lockdropLSTM(rnn_hidden, self.dropout)
+            outputs[self.nlayers - 1].append(output.unsqueeze(0))
+
+        """ Concatenating outputs- both raw and dropped ones across time steps """
+        raw = []
+        op = []
+        for l in range(self.nlayers):
+            raw.append(torch.cat(raw_outputs[l], dim=0))
+            op.append(torch.cat(outputs[l], dim=0))
+            hidden[l] = (hidden[l][0].unsqueeze(0), hidden[l][1].unsqueeze(0))
+
+        output = op[-1]
         decoded = self.final(output.view(output.size(0)*output.size(1), output.size(2)))
         result = decoded.view(output.size(0), output.size(1), decoded.size(1))
         if return_h:
-            return result, hidden, raw_outputs, outputs
+            return result, hidden, raw, op
         return result, hidden
 
     def init_hidden(self, bsz):
         weight = next(self.parameters()).data
         if self.rnn_type == 'LSTM':
-            return [(Variable(weight.new(1, bsz, self.nhid if l != self.nlayers - 1 else (self.ninp if self.tie_weights else self.nhid)).zero_()),
-                    Variable(weight.new(1, bsz, self.nhid if l != self.nlayers - 1 else (self.ninp if self.tie_weights else self.nhid)).zero_()))
-                    for l in range(self.nlayers)]
-        elif self.rnn_type == 'QRNN' or self.rnn_type == 'GRU':
-            return [Variable(weight.new(1, bsz, self.nhid if l != self.nlayers - 1 else (self.ninp if self.tie_weights else self.nhid)).zero_())
+            return [(Variable(weight.new(bsz, self.nhid if l != self.nlayers - 1 else (self.ninp if self.tie_weights else self.nhid)).zero_()),
+                    Variable(weight.new(bsz, self.nhid if l != self.nlayers - 1 else (self.ninp if self.tie_weights else self.nhid)).zero_()))
                     for l in range(self.nlayers)]
 
 class Seq2Seq(nn.Module):
@@ -187,7 +204,7 @@ class Seq2Seq(nn.Module):
             encoder_output, encoder_context = self.encoder(Variable(title.view(len(title), -1)), self.encoder.init_hidden(1), return_h=False)
             h1, h2 = encoder_context[-1]
             hidden_layer = self.decoder.init_hidden(1)
-            hidden_layer[0] = (self.dim_change(h1), self.dim_change(h2))
+            hidden_layer[0] = (self.dim_change(h1)[0], self.dim_change(h2)[0])
             encoder_context = h1
         data, targets = Variable(abstract[:-1].view(len(abstract) - 1, -1)), Variable(abstract[1:].view(-1))
         return_values = self.decoder(data, hidden_layer, return_h, encoder_context,
