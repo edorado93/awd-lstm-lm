@@ -71,7 +71,7 @@ parser.add_argument('--title_abstract_concat_type', type=str, default="sum",
                     help="Type of concatenation between title's word embedding and words in the abstract. (sum, mean, learned)")
 args = parser.parse_args()
 
-print("Arguments entered are:", args)
+print("Arguments entered are:", args, flush=True)
 
 if args.title_abstract_concat and args.encoder == "BOW":
     raise Exception("Cannot concatenate title abstract word embeddings in BOW model")
@@ -97,8 +97,8 @@ nlg_model = model.Seq2Seq(args, num_tokens)
 if args.cuda:
     nlg_model.cuda()
 total_params = sum(x.size()[0] * x.size()[1] if len(x.size()) > 1 else x.size()[0] for x in nlg_model.parameters())
-print('Args:', args)
-print('Model total parameters:', total_params)
+print('Args:', args, flush=True)
+print('Model total parameters:', total_params, flush=True)
 
 """ Title-Abstracts Model Parameters END Here ........................... """
 
@@ -120,7 +120,7 @@ def evaluate(titles, abstracts, batch_size=10):
     return total_loss[0] / len(titles)
 
 def load_word_embeddings(model, filename, word2index):
-    print("Copying pretrained word embeddings from ", filename)
+    print("Copying pretrained word embeddings from ", filename, flush=True)
     en_model = KeyedVectors.load_word2vec_format(filename)
     """ Fetching all of the words in the vocabulary. """
     pretrained_words = set()
@@ -183,7 +183,7 @@ def train():
             print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | '
                     'loss {:5.2f} | ppl {:8.2f}'.format(
                 epoch, batch, len(title_train) // args.bptt, optimizer.param_groups[0]['lr'],
-                elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
+                elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)), flush=True)
             total_loss = 0
             start_time = time.time()
         ###
@@ -197,8 +197,16 @@ stored_loss = 100000000
 
 # At any point you can hit Ctrl + C to break out of training early.
 try:
+    start = time.time()
     optimizer = torch.optim.SGD(nlg_model.parameters(), lr=args.lr, weight_decay=args.wdecay)
     for epoch in range(1, args.epochs+1):
+
+        if time.time() - start >= 82800:
+            print("Saving the model. 24 hour time period over. Re-submitting the task", flush=True)
+            with open(args.save, 'wb') as f:
+                torch.save(nlg_model, f)
+            exit(99)
+
         epoch_start_time = time.time()
         train()
         if 't0' in optimizer.param_groups[0]:
@@ -208,16 +216,16 @@ try:
                 prm.data = optimizer.state[prm]['ax'].clone()
 
             val_loss2 = evaluate(title_valid, abstracts_valid)
-            print('-' * 89)
+            print('-' * 89, flush=True)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                     'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
                                                val_loss2, math.exp(val_loss2) if val_loss2 <= 10 else -1), flush=True)
-            print('-' * 89)
+            print('-' * 89, flush=True)
 
             if val_loss2 < stored_loss:
                 with open(args.save, 'wb') as f:
                     torch.save(nlg_model, f)
-                print('Saving Averaged!')
+                print('Saving Averaged!', flush=True)
                 stored_loss = val_loss2
 
             for prm in nlg_model.parameters():
@@ -225,27 +233,27 @@ try:
 
         else:
             val_loss = evaluate(title_valid, abstracts_valid, eval_batch_size)
-            print('-' * 89)
+            print('-' * 89, flush=True)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                     'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
                                                val_loss, math.exp(val_loss) if val_loss <= 10 else -1), flush=True)
-            print('-' * 89)
+            print('-' * 89, flush=True)
 
             if val_loss < stored_loss:
                 with open(args.save, 'wb') as f:
                     torch.save(nlg_model, f)
-                print('Saving Normal!')
+                print('Saving Normal!', flush=True)
                 stored_loss = val_loss
 
             if 't0' not in optimizer.param_groups[0] and (len(best_val_loss)>args.nonmono and val_loss > min(best_val_loss[:-args.nonmono])):
-                print('Switching!')
+                print('Switching!', flush=True)
                 optimizer = torch.optim.ASGD(nlg_model.parameters(), lr=args.lr, t0=0, lambd=0., weight_decay=args.wdecay)
                 #optimizer.param_groups[0]['lr'] /= 2.
             best_val_loss.append(val_loss)
 
 except KeyboardInterrupt:
-    print('-' * 89)
-    print('Exiting from training early')
+    print('-' * 89, flush=True)
+    print('Exiting from training early', flush=True)
 
 # Load the best saved model.
 with open(args.save, 'rb') as f:
@@ -253,8 +261,8 @@ with open(args.save, 'rb') as f:
 
 # Run on test data.
 test_loss = evaluate(title_test, abstracts_test, test_batch_size)
-print('=' * 89)
+print('=' * 89, flush=True)
 print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
-    test_loss, math.exp(test_loss)))
-print('=' * 89)
+    test_loss, math.exp(test_loss)), flush=True)
+print('=' * 89, flush=True)
 
