@@ -82,9 +82,9 @@ class LSTMEncoder(nn.Module):
             return [Variable(weight.new(1, bsz, self.nhid if l != self.nlayers - 1 else (self.ninp if self.tie_weights else self.nhid)).zero_())
                     for l in range(self.nlayers)]
 
-class LSTMDecoder(nn.Module):
+class LSTMDecoderCell(nn.Module):
     def __init__(self, system_args, num_tokens):
-        super(LSTMDecoder, self).__init__()
+        super(LSTMDecoderCell, self).__init__()
         rnn_type = system_args.model
         self.lockdropLSTM = LockedDropoutLSTMCell()
         self.lockdrop = LockedDropout()
@@ -194,7 +194,7 @@ class Seq2Seq(nn.Module):
         super(Seq2Seq, self).__init__()
         self.title_abstract_concat = system_args.title_abstract_concat
         self.title_abstract_concat_type = system_args.title_abstract_concat_type
-        self.decoder = LSTMDecoder(system_args, num_tokens)
+        self.decoder = LSTMDecoderCell(system_args, num_tokens)
         self.encoder = LSTMEncoder(system_args, num_tokens)
         self.encoder_model = system_args.encoder
         self.dim_change = nn.Linear(system_args.emsize, system_args.nhid)
