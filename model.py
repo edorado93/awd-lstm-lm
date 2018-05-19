@@ -114,6 +114,7 @@ class LSTMDecoder(nn.Module):
         self.nhid = system_args.nhid
         self.nlayers = system_args.nlayers
         self.tie_weights = system_args.tied
+        self.attention = SoftDotAttention(system_args.emsize) if system_args.attention else None
 
     def init_weights(self):
         initrange = 0.1
@@ -127,7 +128,7 @@ class LSTMDecoder(nn.Module):
         else:
             return torch.div(context + abstract, 2.0)
 
-    def forward(self, input, hidden, return_h=False, context=None, is_context_available=False, concat_type="sum"):
+    def forward(self, input, hidden, encoder_outs, return_h=False, context=None, is_context_available=False, concat_type="sum"):
         emb = embedded_dropout(self.embedding, input, dropout=self.dropoute if self.training else 0)
         emb = self.lockdrop(emb, self.dropouti)
 
@@ -159,7 +160,11 @@ class LSTMDecoder(nn.Module):
                     rnn_input = self.lockdropLSTM(rnn_hidden, self.dropouth)
                     outputs[l].append(rnn_input.unsqueeze(0))
 
-            output = self.lockdropLSTM(rnn_hidden, self.dropout)
+            if self.attention:
+                out = self.attention(rnn_hidden, encoder_outs)
+            else:
+                out = rnn_hidden
+            output = self.lockdropLSTM(out, self.dropout)
             outputs[self.nlayers - 1].append(output.unsqueeze(0))
 
         """ Concatenating outputs- both raw and dropped ones across time steps """
@@ -201,13 +206,48 @@ class Seq2Seq(nn.Module):
         encoder_context = None
         """ The encoder context would only be available in case of the LSTM based encoder.  """
         if self.encoder_model == "LSTM":
-            encoder_output, encoder_context = self.encoder(Variable(title.view(len(title), -1)), self.encoder.init_hidden(1), return_h=False)
+            _, encoder_context, _, encoder_outputs = self.encoder(Variable(title.view(len(title), -1)), self.encoder.init_hidden(1), return_h=True)
             h1, h2 = encoder_context[-1]
             hidden_layer = self.decoder.init_hidden(1)
             hidden_layer[0] = (self.dim_change(h1)[0], self.dim_change(h2)[0])
             encoder_context = h1
         data, targets = Variable(abstract[:-1].view(len(abstract) - 1, -1)), Variable(abstract[1:].view(-1))
-        return_values = self.decoder(data, hidden_layer, return_h, encoder_context,
+        return_values = self.decoder(data, hidden_layer, encoder_outputs[-1], return_h, encoder_context,
                                      is_context_available=self.title_abstract_concat, concat_type=self.title_abstract_concat_type)
         return return_values
 
+class SoftDotAttention(nn.Module):
+    """Soft Dot Attention.
+    Ref: http://www.aclweb.org/anthology/D15-1166
+    Adapted from PyTorch OPEN NMT.
+    """
+
+    def __init__(self, dim):
+        """Initialize layer."""
+        super(SoftDotAttention, self).__init__()
+        self.linear_in = nn.Linear(dim, dim, bias=False)
+        self.sm = nn.Softmax()
+        self.linear_out = nn.Linear(dim * 2, dim, bias=False)
+        self.tanh = nn.Tanh()
+        self.mask = None
+
+    def forward(self, input, context):
+        """Propogate input through the network.
+        input: batch x dim
+        context: batch x sourceL x dim
+        """
+        target = self.linear_in(input).unsqueeze(2)  # batch x dim x 1
+
+        context = context.transpose(0, 1) # sourceL * batch * dim
+
+        # Get attention
+        attn = torch.bmm(context, target).squeeze(2)  # batch x sourceL
+        attn = self.sm(attn)
+        attn3 = attn.view(attn.size(0), 1, attn.size(1))  # batch x 1 x sourceL
+
+        weighted_context = torch.bmm(attn3, context).squeeze(1)  # batch x dim
+        h_tilde = torch.cat((weighted_context, input), 1)
+
+        h_tilde = self.tanh(self.linear_out(h_tilde))
+
+        return h_tilde

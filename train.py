@@ -69,6 +69,8 @@ parser.add_argument('--title_abstract_concat', action='store_true',
                     help="Should tie title's word embedding with each word of the abstract before decoding.")
 parser.add_argument('--title_abstract_concat_type', type=str, default="sum",
                     help="Type of concatenation between title's word embedding and words in the abstract. (sum, mean, learned)")
+parser.add_argument('--attention', action='store_true',
+                    help="Should attention mechanism be applied or not.")
 args = parser.parse_args()
 
 print("Arguments entered are:", args, flush=True)
