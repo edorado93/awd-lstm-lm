@@ -7,7 +7,7 @@ from torch.autograd import Variable
 
 from title_data import TitlesAndAbstracts
 from gensim.models import KeyedVectors
-import model
+import model2 as model
 
 import numpy as np
 
@@ -71,6 +71,8 @@ parser.add_argument('--title_abstract_concat_type', type=str, default="sum",
                     help="Type of concatenation between title's word embedding and words in the abstract. (sum, mean, learned)")
 parser.add_argument('--attention', action='store_true',
                     help="Should attention mechanism be applied or not.")
+parser.add_argument('--use_cell', action='store_true',
+                    help="Use torch.nn.LSTMCell instead of torch.nn.LSTM")
 args = parser.parse_args()
 
 print("Arguments entered are:", args, flush=True)
