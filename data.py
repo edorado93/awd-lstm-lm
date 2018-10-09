@@ -3,7 +3,6 @@ import torch
 
 from collections import Counter
 
-
 class Dictionary(object):
     def __init__(self):
         self.word2idx = {}
@@ -25,23 +24,32 @@ class Dictionary(object):
 
 
 class Corpus(object):
-    def __init__(self, path):
+    def __init__(self, path, min_freq=5):
         self.dictionary = Dictionary()
-        self.train = self.tokenize(os.path.join(path, 'train.txt'))
+        self.dictionary.add_word('<unk>')
+        self.min_freq = min_freq
+        self.train = self.tokenize(os.path.join(path, 'train.txt'), create_dict=True)
         self.valid = self.tokenize(os.path.join(path, 'valid.txt'))
         self.test = self.tokenize(os.path.join(path, 'test.txt'))
 
-    def tokenize(self, path):
+    def tokenize(self, path, create_dict=False):
         """Tokenizes a text file."""
         assert os.path.exists(path)
         # Add words to the dictionary
+        all_words = Dictionary()
+        tokens = 0
         with open(path, 'r') as f:
-            tokens = 0
             for line in f:
                 words = line.split() + ['<eos>']
                 tokens += len(words)
                 for word in words:
-                    self.dictionary.add_word(word)
+                    all_words.add_word(word)
+
+        for index in all_words.counter:
+            if all_words.counter[index] >= self.min_freq:
+                # ONLY consider words of the training corpus for vocab. Not the validation and train sets.
+                if create_dict:
+                    self.dictionary.add_word(all_words.idx2word[index])
 
         # Tokenize file content
         with open(path, 'r') as f:
@@ -50,7 +58,7 @@ class Corpus(object):
             for line in f:
                 words = line.split() + ['<eos>']
                 for word in words:
-                    ids[token] = self.dictionary.word2idx[word]
+                    ids[token] = self.dictionary.word2idx.get(word, self.dictionary.word2idx['<unk>'])
                     token += 1
 
         return ids

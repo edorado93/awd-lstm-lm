@@ -4,6 +4,7 @@ import math
 import numpy as np
 import torch
 import torch.nn as nn
+from tensorboardX import SummaryWriter
 
 import data
 import model
@@ -67,6 +68,7 @@ parser.add_argument('--when', nargs="+", type=int, default=[-1],
 args = parser.parse_args()
 args.tied = True
 
+writer = SummaryWriter("saved_runs/" + args.save)
 # Set the random seed manually for reproducibility.
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
@@ -81,13 +83,25 @@ if torch.cuda.is_available():
 ###############################################################################
 
 def model_save(fn):
+    global model, criterion
     with open(fn, 'wb') as f:
-        torch.save([model, criterion, optimizer], f)
+        if args.cuda:
+            model = model.cpu()
+            criterion = criterion.cpu()
+        torch.save([model.state_dict(), criterion.state_dict()], f)
+        if args.cuda:
+            model = model.cuda()
+            criterion = criterion.cuda()
 
 def model_load(fn):
     global model, criterion, optimizer
     with open(fn, 'rb') as f:
-        model, criterion, optimizer = torch.load(f)
+        checkpoint = torch.load(f)
+        model.load_state_dict(checkpoint)
+        criterion.load_state_dict(checkpoint)
+        if args.cuda:
+            model = model.cuda()
+            criterion = criterion.cuda()
 
 import os
 import hashlib
@@ -110,12 +124,34 @@ test_data = batchify(corpus.test, test_batch_size, args)
 # Build the model
 ###############################################################################
 
-from splitcross import SplitCrossEntropyLoss
-criterion = None
-
+### MODEL INIT
 ntokens = len(corpus.dictionary)
 model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.dropouth, args.dropouti, args.dropoute, args.wdrop, args.tied)
-###
+
+### LOSS CRITERION INIT
+criterion = nn.CrossEntropyLoss(ignore_index=0)
+
+### PARAMS
+params = list(model.parameters()) + list(criterion.parameters())
+
+### OPTIMIZER INIT
+optimizer = None
+# Ensure the optimizer is optimizing params, which includes both the model's weights as well as the criterion's weight (i.e. Adaptive Softmax)
+if args.optimizer == 'sgd':
+    optimizer = torch.optim.SGD(params, lr=args.lr, weight_decay=args.wdecay)
+if args.optimizer == 'adam':
+    optimizer = torch.optim.Adam(params, lr=args.lr, weight_decay=args.wdecay)
+
+### CUDIFY
+if args.cuda:
+    model = model.cuda()
+    criterion = criterion.cuda()
+
+total_params = sum(x.size()[0] * x.size()[1] if len(x.size()) > 1 else x.size()[0] for x in params if x.size())
+print('Args:', args)
+print('Model total parameters:', total_params)
+
+### RESUME MODEL IF SPECIFIED
 if args.resume:
     print('Resuming model ...')
     model_load(args.resume)
@@ -126,28 +162,6 @@ if args.resume:
         for rnn in model.rnns:
             if type(rnn) == WeightDrop: rnn.dropout = args.wdrop
             elif rnn.zoneout > 0: rnn.zoneout = args.wdrop
-###
-if not criterion:
-    splits = []
-    if ntokens > 500000:
-        # One Billion
-        # This produces fairly even matrix mults for the buckets:
-        # 0: 11723136, 1: 10854630, 2: 11270961, 3: 11219422
-        splits = [4200, 35000, 180000]
-    elif ntokens > 75000:
-        # WikiText-103
-        splits = [2800, 20000, 76000]
-    print('Using', splits)
-    criterion = SplitCrossEntropyLoss(args.emsize, splits=splits, verbose=False)
-###
-if args.cuda:
-    model = model.cuda()
-    criterion = criterion.cuda()
-###
-params = list(model.parameters()) + list(criterion.parameters())
-total_params = sum(x.size()[0] * x.size()[1] if len(x.size()) > 1 else x.size()[0] for x in params if x.size())
-print('Args:', args)
-print('Model total parameters:', total_params)
 
 ###############################################################################
 # Training code
@@ -158,12 +172,11 @@ def evaluate(data_source, batch_size=10):
     model.eval()
     if args.model == 'QRNN': model.reset()
     total_loss = 0
-    ntokens = len(corpus.dictionary)
     hidden = model.init_hidden(batch_size)
     for i in range(0, data_source.size(0) - 1, args.bptt):
         data, targets = get_batch(data_source, i, args, evaluation=True)
         output, hidden = model(data, hidden)
-        total_loss += len(data) * criterion(model.decoder.weight, model.decoder.bias, output, targets).data
+        total_loss += len(data) * criterion(output, targets).data
         hidden = repackage_hidden(hidden)
     return total_loss.item() / len(data_source)
 
@@ -173,7 +186,6 @@ def train():
     if args.model == 'QRNN': model.reset()
     total_loss = 0
     start_time = time.time()
-    ntokens = len(corpus.dictionary)
     hidden = model.init_hidden(args.batch_size)
     batch, i = 0, 0
     while i < train_data.size(0) - 1 - 1:
@@ -194,7 +206,7 @@ def train():
         optimizer.zero_grad()
 
         output, hidden, rnn_hs, dropped_rnn_hs = model(data, hidden, return_h=True)
-        raw_loss = criterion(model.decoder.weight, model.decoder.bias, output, targets)
+        raw_loss = criterion(output, targets)
 
         loss = raw_loss
         # Activiation Regularization
@@ -229,12 +241,6 @@ stored_loss = 100000000
 
 # At any point you can hit Ctrl + C to break out of training early.
 try:
-    optimizer = None
-    # Ensure the optimizer is optimizing params, which includes both the model's weights as well as the criterion's weight (i.e. Adaptive Softmax)
-    if args.optimizer == 'sgd':
-        optimizer = torch.optim.SGD(params, lr=args.lr, weight_decay=args.wdecay)
-    if args.optimizer == 'adam':
-        optimizer = torch.optim.Adam(params, lr=args.lr, weight_decay=args.wdecay)
     for epoch in range(1, args.epochs+1):
         epoch_start_time = time.time()
         train()
@@ -245,6 +251,7 @@ try:
                 prm.data = optimizer.state[prm]['ax'].clone()
 
             val_loss2 = evaluate(val_data)
+            writer.add_scalar('loss/valid', val_loss2, epoch)
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                 'valid ppl {:8.2f} | valid bpc {:8.3f}'.format(
@@ -261,6 +268,7 @@ try:
 
         else:
             val_loss = evaluate(val_data, eval_batch_size)
+            writer.add_scalar('loss/valid', val_loss, epoch)
             print('-' * 89)
             print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                 'valid ppl {:8.2f} | valid bpc {:8.3f}'.format(
