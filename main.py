@@ -97,8 +97,8 @@ def model_load(fn):
     global model, criterion, optimizer
     with open(fn, 'rb') as f:
         checkpoint = torch.load(f)
-        model.load_state_dict(checkpoint)
-        criterion.load_state_dict(checkpoint)
+        model.load_state_dict(checkpoint[0])
+        criterion.load_state_dict(checkpoint[1])
         if args.cuda:
             model = model.cuda()
             criterion = criterion.cuda()
@@ -298,6 +298,7 @@ except KeyboardInterrupt:
 
 # Load the best saved model.
 model_load(args.save)
+torch.save([model], "JUST_MODEL"+args.save)
 
 # Run on test data.
 test_loss = evaluate(test_data, test_batch_size)
